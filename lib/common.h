@@ -6,5 +6,9 @@
 #include <string.h>
 #include <unistd.h>
 #include <arpa/inet.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+
+#define WEB_ROOT "./www"
 
 #endif // _COMMON_H_

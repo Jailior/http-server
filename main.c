@@ -46,17 +46,20 @@ void *worker_thread(void *arg) {
         int client_fd = dequeue();
 
         char buffer[4096] = {0};
-        read(client_fd, buffer, sizeof(buffer));
-        printf("Received request:\n%s\n", buffer);
-
-        const char *http_response =
-            "HTTP/1.1 200 OK\r\n"
-            "Content-Type: text/html\r\n"
-            "Content-Length: 20\r\n"
-            "\r\n"
-            "<h1>Hello world!</h1>";
+        read(client_fd, buffer, sizeof(buffer) - 1);
         
-        send(client_fd, http_response, strlen(http_response), 0);
+        char method[8], path[256];
+        sscanf(buffer, "%s %s", method, path);
+
+        printf("Request: %s %s\n", method, path);
+
+        if (strcmp(method, "GET") == 0) {
+            serve_file(client_fd, path);
+        } else {
+            const char *not_allowed = "<h1>405 Method Not Allowed</h1>";
+            send_response(client_fd, 405, "Not Allowed", "text/html", not_allowed, strlen(not_allowed));
+        }
+
         close(client_fd);
     }
     return NULL;
@@ -76,6 +79,9 @@ int main() {
 
     // Create socket
     socket_fd = socket(AF_INET, SOCK_STREAM, 0);
+
+    int opt = 1;
+    setsockopt(socket_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
     
     // Bind socket
     bind_socket(socket_fd, 8080);

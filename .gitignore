@@ -1,4 +1,5 @@
 server
+www/*
 
 # Prerequisites
 *.d
