@@ -2,30 +2,66 @@
 #include "lib/tools.h"
 #include <pthread.h>
 
-void *handle_client(void *arg) {
-    int client_fd = *(int *) arg;
-    free(arg);
+#define PORT 8080
+#define MAX_QUEUE 100
+#define THREAD_POOL_SIZE 8
 
-    char buffer[4096] = {0};
+/* Job Queue */
+int job_queue[MAX_QUEUE];
+int front, rear, count = 0;
 
-    // Read request
-    read(client_fd, buffer, sizeof(buffer));
-    printf("Received request:\n%s\n", buffer);
+pthread_mutex_t queue_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t queue_cond = PTHREAD_COND_INITIALIZER;
 
-    // Send a response
-    const char *http_response =
-        "HTTP/1.1 200 OK\r\n"
-        "Content-Type: text/html\r\n"
-        "Content-Length: 20\r\n"
-        "\r\n"
-        "<h1>Hello world!</h1>";
-    
-    send(client_fd, http_response, strlen(http_response), 0);
+void enqueue(int client_fd) {
+    pthread_mutex_lock(&queue_mutex);
+    while (count == MAX_QUEUE) {
+        // queue is full, wait
+        pthread_cond_wait(&queue_cond, &queue_mutex);
+    }
+    job_queue[rear] = client_fd;
+    rear = (rear + 1) % MAX_QUEUE;
+    count++;
+    pthread_cond_signal(&queue_cond);
+    pthread_mutex_unlock(&queue_mutex);
+}
 
-    // Close the connection
-    close(client_fd);
+int dequeue() {
+    pthread_mutex_lock(&queue_mutex);
+    while (count == 0) {
+        // queue is empty, wait
+        pthread_cond_wait(&queue_cond, &queue_mutex);
+    }
+    int client_fd = job_queue[front];
+    front = (front + 1) % MAX_QUEUE;
+    count--;
+    pthread_cond_signal(&queue_cond);
+    pthread_mutex_unlock(&queue_mutex);
+    return client_fd;
+}
+
+/* Worker Thread Function */
+void *worker_thread(void *arg) {
+    while (1) {
+        int client_fd = dequeue();
+
+        char buffer[4096] = {0};
+        read(client_fd, buffer, sizeof(buffer));
+        printf("Received request:\n%s\n", buffer);
+
+        const char *http_response =
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Type: text/html\r\n"
+            "Content-Length: 20\r\n"
+            "\r\n"
+            "<h1>Hello world!</h1>";
+        
+        send(client_fd, http_response, strlen(http_response), 0);
+        close(client_fd);
+    }
     return NULL;
 }
+
 
 // Creates TCP socket
 // An HTTP server is basically a TCP socket that listens on port 80
@@ -47,24 +83,23 @@ int main() {
     // Listen for connections
     listen(socket_fd, 10);
 
-    printf("Listening on port 8080...\n");
+    printf("Server listening on port %d with %d worker threads...\n", PORT, THREAD_POOL_SIZE);
+
+    pthread_t threads[THREAD_POOL_SIZE];
+    for (int i = 0; i < THREAD_POOL_SIZE; i++) {
+        pthread_create(&threads[i], NULL, worker_thread, NULL);
+        pthread_detach(threads[i]);
+    }
 
     while (1) {
-        // Accept a connection
-        int *client_fd = malloc(sizeof(int));
-        
-        *client_fd = accept(socket_fd, (struct sockaddr*)&address, &addr_len);
-
-        pthread_t thread_id;
-
-        if (pthread_create(&thread_id, NULL, handle_client, client_fd) != 0) {
-            perror("Failed to create thread");
-            close(*client_fd);
-            free(client_fd);
-        } else {
-            pthread_detach(thread_id);
+        int client_fd = accept(socket_fd, (struct sockaddr*)&address, &addr_len);
+        if (client_fd < 0) {
+            perror("Accept failed");
+            continue;
         }
+        enqueue(client_fd);
     }
+
 
     close(socket_fd);
     return 0;

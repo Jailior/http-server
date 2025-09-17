@@ -4,7 +4,7 @@ CFLAGS = -Wall -g
 all: server
 
 server: main.o tools.o
-	$(CC) $(CFLAGS) -o server main.o tools.o
+	$(CC) $(CFLAGS) -o server main.o tools.o -lpthread
 
 tools.o: tools.c lib/common.h lib/tools.h
 	$(CC) $(CFLAGS) -c tools.c
